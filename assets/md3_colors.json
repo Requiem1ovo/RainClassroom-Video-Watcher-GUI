@@ -1,0 +1,60 @@
+{
+  "name": "Material Design 3 - RainClassroom Video Watcher",
+  "version": "1.0.0",
+  "description": "MD3 color tokens",
+  "light": {
+    "primary": "#6750A4",
+    "on_primary": "#FFFFFF",
+    "primary_container": "#EADDFF",
+    "on_primary_container": "#21005D",
+    "secondary": "#625B71",
+    "on_secondary": "#FFFFFF",
+    "secondary_container": "#E8DEF8",
+    "on_secondary_container": "#1D192B",
+    "tertiary": "#7D5260",
+    "on_tertiary": "#FFFFFF",
+    "tertiary_container": "#FFD8E4",
+    "on_tertiary_container": "#31111D",
+    "error": "#B3261E",
+    "on_error": "#FFFFFF",
+    "error_container": "#F9DEDC",
+    "on_error_container": "#410E0B",
+    "background": "#FFFBFE",
+    "on_background": "#1C1B1F",
+    "surface": "#FFFBFE",
+    "on_surface": "#1D1B20",
+    "on_surface_alt": "#1C1B1F",
+    "text_secondary": "#3D3D3D",
+    "surface_variant": "#E7E0EC",
+    "on_surface_variant": "#49454F",
+    "outline": "#79747E",
+    "outline_variant": "#CAC4D0",
+    "outline_light": "#E3E3E3",
+    "inverse_surface": "#313033",
+    "inverse_on_surface": "#F4EFF4",
+    "inverse_primary": "#D0BCFF",
+    "surface_tint": "#6750A4",
+    "scrim": "#000000",
+    "success": "#2E7D32",
+    "warning": "#E65100"
+  },
+  "fonts": {
+    "default_family": "Roboto",
+    "weights": {
+      "regular": "400",
+      "medium": "500",
+      "bold": "700"
+    },
+    "sizes": {
+      "body_large": 16,
+      "body_medium": 14,
+      "body_small": 12,
+      "title_large": 22,
+      "title_medium": 16,
+      "title_small": 14,
+      "label_large": 14,
+      "label_medium": 12,
+      "label_small": 11
+    }
+  }
+}

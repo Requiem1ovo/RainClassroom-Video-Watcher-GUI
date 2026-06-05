@@ -5,6 +5,7 @@
 """
 
 import sys
+import argparse
 import string
 import time
 import asyncio
@@ -15,6 +16,10 @@ from typing import Any, Literal, Optional, Sequence
 ####################################################################################################
 # 用户和课程信息
 
+DEFAULT_AUTHORITY = "changjiang.yuketang.cn"
+DEFAULT_XTBZ = "ykt"
+
+# 命令行参数会覆盖以下默认值
 authority = "changjiang.yuketang.cn"
 session_id = "0123456789abcdefghijklmnopqrstuv"
 csrf_token = "0123456789abcdefghijklmnopqrstuv"
@@ -29,11 +34,72 @@ timedelta = 60*30  # 视频观看日志时间戳提前秒数
 
 ####################################################################################################
 
+
+def _parse_args() -> None:
+    """解析命令行参数,覆盖模块级默认变量。"""
+    parser = argparse.ArgumentParser(
+        prog="RainClassroomVideoWatcher",
+        description="雨课堂视频自动观看脚本(GUI 调用的命令行入口)",
+    )
+    parser.add_argument("--authority", default=DEFAULT_AUTHORITY,
+        help="雨课堂域名,默认 changjiang.yuketang.cn")
+    parser.add_argument("--sessionid", default=None,
+        help="浏览器 Cookie 中的 sessionid")
+    parser.add_argument("--csrf-token", dest="csrf_token", default=None,
+        help="浏览器 Cookie 中的 csrftoken")
+    parser.add_argument("--xtbz", default=DEFAULT_XTBZ,
+        help="雨课堂标识,默认 ykt")
+    parser.add_argument("--classroom-id", dest="classroom_id", default=None, type=int,
+        help="课程 ID(URL 末尾数字)")
+    args = parser.parse_args()
+
+    global authority, session_id, csrf_token, xtbz, classroom_id
+    if args.authority:
+        authority = args.authority
+    if args.sessionid:
+        session_id = args.sessionid
+    if args.csrf_token:
+        csrf_token = args.csrf_token
+    if args.xtbz:
+        xtbz = args.xtbz
+    if args.classroom_id is not None:
+        classroom_id = args.classroom_id
+
+
+_parse_args()
+
+####################################################################################################
+
 try:
     import httpx
 except ModuleNotFoundError as e:
     print("你需要执行 'pip install httpx[http2]' 以安装 HTTPX")
     exit()
+
+####################################################################################################
+# 自定义日志级别
+
+SUCCESS_LEVEL = 25
+logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
+
+
+def _log_success(self: logging.Logger, message: str, *args, **kwargs) -> None:
+    if self.isEnabledFor(SUCCESS_LEVEL):
+        self._log(SUCCESS_LEVEL, message, args, **kwargs)
+
+
+logging.Logger.success = _log_success  # type: ignore[attr-defined]
+
+
+class _GuiFormatter(logging.Formatter):
+    """
+    GUI 友好的日志格式:输出单行 `[LEVEL] message`。
+    """
+    def format(self, record: logging.LogRecord) -> str:
+        levelname = record.levelname
+        msg = record.getMessage()
+        return f"[{levelname}] {msg}"
+
 
 ####################################################################################################
 
@@ -46,23 +112,19 @@ class RainClassroomClient:
         self._logger = logging.getLogger(f"RainClassroomClient {id(self)}")
         if not self._logger.hasHandlers():
             logging_handler = logging.StreamHandler(sys.stdout)
-            logging_handler.setFormatter(logging.Formatter(
-                "%(asctime)s | %(levelname)-8s | %(message)s", '%Y-%m-%d %H:%M:%S'))
+            logging_handler.setFormatter(_GuiFormatter())
             self._logger.addHandler(logging_handler)
             self._logger.setLevel(logging_level)
 
         self._authority = authority
-        # 浏览器 Headers
         headers = dict()
         headers['User-Agent'] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
             " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0")
         headers['Sec-Fetch-Site'] = 'same-origin'
         headers['Sec-Fetch-Mode'] = 'cors'
         headers['Sec-Fetch-Dest'] = 'empty'
-        # 雨课堂 Headers
         headers['X-Csrftoken'] = csrf_token
         headers["xtbz"] = xtbz
-        # 雨课堂 Cookies
         cookies = dict()
         cookies['sessionid'] = session_id
         cookies['csrftoken'] = csrf_token
@@ -251,7 +313,6 @@ class RainClassroomVideoLog(object):
         self.log.v_url = ''
 
     ################################################################################################
-    # 事件
 
     def on_loadstart(self) -> dict:
         self.log.et = 'loadstart'
@@ -400,8 +461,12 @@ class RainClassroomVideoWatcher(RainClassroomClient):
 
     ################################################################################################
 
-    async def watch(self):
-        """观看视频"""
+    async def watch(self) -> bool:
+        """观看视频
+
+        :returns: ``True`` 表示所有视频均已完成,``False`` 表示仍有视频未完成
+            (重试 4 轮仍未达标),此时上层应区别对待(退出码非 0)。
+        """
         await self.obtain_info()
 
         self._logger.info("获取章节和节点开始")
@@ -411,19 +476,18 @@ class RainClassroomVideoWatcher(RainClassroomClient):
         self._get_chapter_leaf(videos, chapters_leafs, leaf_type=0)
         self._logger.info(f"获取章节和节点完成，共{len(chapters_leafs)}节点，共{len(videos)}视频")
 
+        all_done = False
         retry = 0
         while retry <= 3:
 
-            # 未完成观看的视频需要视频信息
             if retry == 1:
                 self._logger.info("获取章节节点开始")
                 videos = await self.batch_query_leaf(videos)
                 self._logger.info(f"获取章节节点完成，共{len(videos)}视频")
                 await self.sleep(2+len(videos))
 
-            # 第1次仅查询视频观看进度
             if retry >= 1:
-                self._logger.info(f"发送视频观看日志开始，共{len(videos)}视频")
+                self._logger.info(f"发送视频观看日志开始,共{len(videos)}视频")
                 await self.batch_send_video_logs(videos, progresses)
                 self._logger.info("发送视频观看日志完成")
                 await self.sleep(2+len(videos))
@@ -431,31 +495,41 @@ class RainClassroomVideoWatcher(RainClassroomClient):
             retry += 1
             self._logger.info(f"第{retry}次获取视频观看进度开始")
             progresses = await self.batch_query_video_watch_progress(videos)
-            # 仅获得未完成视频
             videos_progresses = tuple((leaf, progress)
                 for leaf, progress in zip(videos, progresses)
                 if progress is None or not bool(progress["completed"]))
                 # if progress is None or progress["rate"] < 1)
 
-            # 全部为已完成视频
             if not videos_progresses:
-                self._logger.info("获取视频观看进度完成，全部视频已完成")
+                self._logger.success("获取视频观看进度完成,全部视频已完成")
+                all_done = True
                 break
-            # 有未完成视频
             else:
                 videos, progresses = zip(*videos_progresses)
                 self._logger.info(f"获取视频观看进度完成，共{len(videos)}视频未完成")
 
-        # 超过重试次数仍有未完成视频
         else:
-            self._logger.error(f"已{retry}次获取视频观看进度，但{len(videos)}视频未完成")
+            self._logger.error(f"已{retry}次获取视频观看进度,但{len(videos)}视频未完成")
+
+        return all_done
 
 
 ####################################################################################################
-# 主函数
 
 if __name__ == '__main__':
     watcher = RainClassroomVideoWatcher(authority=authority,
         session_id=session_id, csrf_token=csrf_token, xtbz=xtbz,
         classroom_id=classroom_id, logging_level=logging_level, timedelta=timedelta)
-    asyncio.run(watcher.watch())
+    try:
+        all_done = asyncio.run(watcher.watch())
+        if all_done:
+            watcher._logger.success("刷课完成")
+        else:
+            # watch() 内部已记 ERROR,这里用 WARNING + 退出码 3 区分"非异常但未完成"。
+            watcher._logger.warning("刷课未完成:仍有视频未达到完成状态")
+            sys.exit(3)
+    except KeyboardInterrupt:
+        watcher._logger.warning("用户中断,进程退出")
+    except Exception as e:
+        watcher._logger.error(f"刷课异常: {e}")
+        sys.exit(1)

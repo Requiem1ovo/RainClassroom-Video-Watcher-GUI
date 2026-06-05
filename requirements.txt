@@ -1,0 +1,4 @@
+flet
+httpx[http2]
+selenium>=4.6
+certifi
