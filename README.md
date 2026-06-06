@@ -1,6 +1,6 @@
 # RainClassroom-Video-Watcher-GUI
 
-[RainClassroom-Video-Watcher](https://github.com/Accurio/RainClassroom-Video-Watcher)的图形界面版本。基于 Flet 构建。
+[RainClassroom-Video-Watcher](https://github.com/Accurio/RainClassroom-Video-Watcher)的图形界面版本，基于 Flet 构建。
 
 
 >如果你付费获得了本软件，那么你被骗了
@@ -30,7 +30,7 @@ pip install -r requirements.txt
 1. 在项目目录下执行：
 
    ```powershell
-   python main.py
+   python gui.py
    ```
 
 2. 在主界面填写或调整以下字段：
