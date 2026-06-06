@@ -401,7 +401,7 @@ class BrowserView:
         )
 
     async def on_mount(self) -> None:
-
+        _show_snack(self.page, "正在启动浏览器，首次使用可能需要下载驱动...")
         ok = await asyncio.to_thread(
             self.app.start_browser_if_needed, self.authority,
         )
