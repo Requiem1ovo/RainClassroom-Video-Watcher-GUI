@@ -31,12 +31,7 @@ class BrowserController(ABC):
 
     @abstractmethod
     def start_browser(self, url: str) -> None:
-        """
-        启动浏览器并导航至指定 URL。
-
-        :raises BrowserControllerError: 启动失败时
-        """
-        raise NotImplementedError
+        """启动浏览器并导航至指定 URL。"""
 
     @abstractmethod
     def get_cookies(self) -> CookieData:

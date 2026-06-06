@@ -26,27 +26,9 @@ _CHILD_ENV_ENCODING = {
 
 _SENSITIVE_ENV_PREFIX = "RCVW_"
 
-_SENSITIVE_FLAGS = frozenset({"--sessionid", "--csrf-token", "--xtbz"})
-
-
 _SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(session_?id|csrf_?token|xtbz)\s*=\s*['\"]?([^\s'\"&,;)]+)"
 )
-
-
-def _sanitize_argv(cmd: list[str]) -> list[str]:
-    out: list[str] = []
-    skip_next = False
-    for token in cmd:
-        if skip_next:
-            out.append("***")
-            skip_next = False
-        elif token in _SENSITIVE_FLAGS:
-            out.append(token)
-            skip_next = True
-        else:
-            out.append(token)
-    return out
 
 
 def _sanitize_line(line: str) -> str:
@@ -104,7 +86,7 @@ class WatcherRunner:
             raise FileNotFoundError(f"python 解释器不存在: {self.python}")
 
         cmd = self._build_cmd()
-        _logger.info("启动子进程: %s", " ".join(shlex.quote(c) for c in _sanitize_argv(cmd)))
+        _logger.info("启动子进程: %s", " ".join(shlex.quote(c) for c in cmd))
         env = self._build_env()
         process = subprocess.Popen(
             cmd,

@@ -802,10 +802,7 @@ class App:
         home = self.home_view
         home.tf_sessionid.value = data.sessionid or ""
         home.tf_csrf.value = data.csrftoken or ""
-        if data.xtbz:
-            home.tf_xtbz.value = data.xtbz
-        else:
-            home.tf_xtbz.value = DEFAULT_XTBZ
+        home.tf_xtbz.value = data.xtbz or DEFAULT_XTBZ
         home.tf_classroom_id.value = str(data.classroom_id)
         home.view.update()
         _show_snack(self.page, "Cookie 已填入")
