@@ -14,14 +14,8 @@ from pathlib import Path
 from typing import Optional
 
 
-# ----------------------------------------------------------------------
-# SSL 证书修复
-# ----------------------------------------------------------------------
-# Flet 首次启动从 GitHub 下载客户端(~150 MB),内部走
-# `urllib.request.urlretrieve` + `ssl.create_default_context()`。WindowsApps
-# Python 不打包 CA 证书,精简 Windows 镜像又常缺 github.com 证书链,会直接
-# 抛 SSLCertVerificationError。提前把 SSL_CERT_FILE 指向 certifi 的 CA bundle,
-# `create_default_context()` 会优先读这个环境变量,跳过系统证书存储。
+# Flet 首次启动从 GitHub 下载客户端(~150 MB),内部走 urllib + ssl.create_default_context()。
+# WindowsApps Python 不打包 CA 证书,精简镜像常缺 github.com 证书链,提前设 SSL_CERT_FILE 跳过系统存储。
 def _fix_ssl_for_urllib() -> None:
     if os.environ.get("SSL_CERT_FILE"):
         return
@@ -43,10 +37,6 @@ from platforms import BrowserControllerError, create_browser_controller  # noqa:
 from subprocess_runner import WatcherRunner  # noqa: E402
 
 _logger = logging.getLogger(__name__)
-
-# ----------------------------------------------------------------------
-# 常量 / 资源加载
-# ----------------------------------------------------------------------
 
 _HERE = Path(__file__).resolve().parent
 _ASSETS = _HERE / "assets"
@@ -72,13 +62,7 @@ DEFAULT_XTBZ = "ykt"
 _CN_FONT_FAMILY = "Microsoft YaHei UI"
 _MONO_FONT_FAMILY = "Consolas"
 
-# ----------------------------------------------------------------------
-# 工具
-# ----------------------------------------------------------------------
-
-
 def _build_theme() -> ft.Theme:
-    
     return ft.Theme(
         font_family=_CN_FONT_FAMILY,
         color_scheme_seed=_MD3["primary"],
@@ -111,11 +95,10 @@ def _build_theme() -> ft.Theme:
 
 
 def _parse_log_line(line: str) -> tuple[str, str]:
-    
     m = re.match(r"^\[(INFO|SUCCESS|ERROR|CRITICAL|WARNING|DEBUG)\]\s*(.*)$", line)
     if m:
         return m.group(1), m.group(2)
-    
+
     if line.startswith((" ", "\t")):
         return "CONT", line
     return "INFO", line
@@ -129,7 +112,6 @@ def _short_ssl_error(e: BaseException) -> str:
     """把 urllib/ssl 的多层嵌套错误压成一行。"""
     inner = getattr(e, "reason", None) or getattr(e, "args", [None])[0] or e
     msg = str(inner).strip()
-    # 截断过长消息
     if len(msg) > 240:
         msg = msg[:240] + "..."
     return msg or e.__class__.__name__
@@ -142,11 +124,6 @@ def _show_snack(page: ft.Page, message: str, *, error: bool = False) -> None:
             bgcolor=_MD3["error"] if error else _MD3["primary"],
         )
     )
-
-
-# ----------------------------------------------------------------------
-# 主窗口 (View: home)
-# ----------------------------------------------------------------------
 
 
 class HomeView:
@@ -323,13 +300,8 @@ class HomeView:
         self._loading_browser = False
         self._browser_btn.disabled = False
         self._browser_btn.icon = ft.Icons.LANGUAGE
-        self._browser_btn.content = "浏览器"
+        self._browser_btn.content = ft.Text("浏览器")
         self.page.update()
-
-
-# ----------------------------------------------------------------------
-# 浏览器子页面
-# ----------------------------------------------------------------------
 
 
 class BrowserView:
@@ -421,13 +393,7 @@ class BrowserView:
         self.app.close_browser_view()
 
 
-# ----------------------------------------------------------------------
-# 日志子窗口 (View: log)
-# ----------------------------------------------------------------------
-
-
 class LogView:
-    """日志子窗口"""
 
     MAX_LINES = 5000  # 防止内存爆炸
 
@@ -442,7 +408,6 @@ class LogView:
             scroll=ft.ScrollMode.AUTO,
             auto_scroll=True,
             expand=True,
-            
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
         self._status_text = ft.Text(
@@ -465,10 +430,8 @@ class LogView:
         self.view = ft.View(
             route="/log",
             padding=0,
-            
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[
-                
                 ft.AppBar(
                     leading=ft.IconButton(
                         ft.Icons.ARROW_BACK,
@@ -485,7 +448,6 @@ class LogView:
                     bgcolor=_MD3["surface"],
                     elevation=0,
                 ),
-                
                 ft.Container(
                     content=self._log_column,
                     expand=True,
@@ -494,7 +456,6 @@ class LogView:
                     padding=12,
                     margin=ft.Margin(16, 0, 16, 16),
                 ),
-                
                 ft.Container(
                     content=ft.Row(
                         [
@@ -516,7 +477,6 @@ class LogView:
         self._user_stopped = False
         self._last_level: str = "INFO"
 
-        
         self._log_column.controls.append(
             ft.Text(
                 "[INFO]免费软件，开源地址https://github.com/Requiem1ovo/RainClassroom-Video-Watcher-GUI",
@@ -543,11 +503,10 @@ class LogView:
         self._reader_thread.start()
 
     def _read_loop(self) -> None:
-        # 本地捕获 runner:App.close_log_window 会把 ``self.runner = None``,
-        # 直接读 ``self.runner.wait()`` 会 AttributeError。runner 引用必须
-        # 在 while 循环前抓牢,finally 才安全。
+        # 本地捕获 runner:close_log_window 会置 self.runner=None,必须在循环前抓牢否则 finally 出错。
         runner = self.runner
-        assert runner is not None
+        if runner is None:
+            return
         try:
             for line in runner.stream():
                 self.page.run_task(self._append_line, line)
@@ -565,10 +524,6 @@ class LogView:
             except Exception:  # pragma: no cover
                 _logger.exception("调度 _mark_done 失败")
 
-    # ------------------------------------------------------------------
-    # UI 更新
-    # ------------------------------------------------------------------
-
     async def _append_line(self, line: str) -> None:
         level, text = _parse_log_line(line)
         if level == "CONT":
@@ -585,8 +540,7 @@ class LogView:
         )
         self._lines.append(line_text)
         if len(self._lines) > self.MAX_LINES:
-            # 列表/控件解耦:list(kept) 防止 controls 与 self._lines 别名导致
-            # 长度同步变化;r.page=None 释放已移除 Text 的页面引用避免泄漏。
+            # list(kept) 解耦 controls 与 _lines 别名;r.page=None 释放已移除 Text 的页面引用。
             kept = self._lines[-self.MAX_LINES :]
             removed = self._lines[: -self.MAX_LINES]
             self._log_column.controls = list(kept)
@@ -606,7 +560,6 @@ class LogView:
             self._status_text.color = _MD3["on_surface_variant"]
             await self._append_line("[WARNING] 用户已停止刷课")
         elif success:
-
             self._status_text.value = "完成"
             self._status_text.color = _MD3["success"]
         else:
@@ -621,9 +574,10 @@ class LogView:
         """视图被外部关闭时调用,阻断 _read_loop.finally 后续 UI 更新。"""
         self._done = True
 
-    # ------------------------------------------------------------------
-    # 事件
-    # ------------------------------------------------------------------
+    @property
+    def is_running(self) -> bool:
+        """刷课进程是否仍在运行。"""
+        return not self._done
 
     def _on_back_clicked(self, e: ft.ControlEvent) -> None:
         if not self._done:
@@ -644,9 +598,7 @@ class LogView:
                 self.page.pop_dialog()
                 if self.runner is not None:
                     self._user_stopped = True
-                    # runner.terminate() 内部 process.wait(timeout=5) 会阻塞
-                    # 5s,同步调冻结 Flet event loop。改用后台线程:进程真正
-                    # 退出后 _read_loop.finally 会调度 _mark_done。
+                    # runner.terminate() 内部 wait(5s) 会阻塞 Flet 事件循环,改用后台线程。
                     threading.Thread(
                         target=self.runner.terminate,
                         daemon=True,
@@ -676,11 +628,6 @@ class LogView:
         self.page.show_dialog(dlg)
 
 
-# ----------------------------------------------------------------------
-# 应用主对象
-# ----------------------------------------------------------------------
-
-
 class App:
     """Flet 应用主对象:负责 View 切换与全局状态管理。"""
 
@@ -701,10 +648,6 @@ class App:
         self.page.views.append(self.home_view.view)
         self.page.run_task(self.page.push_route, "/")
 
-    # ------------------------------------------------------------------
-    # 页面配置
-    # ------------------------------------------------------------------
-
     def _setup_page(self) -> None:
         self.page.title = "雨课堂视频助手"
         self.page.theme = _build_theme()
@@ -716,14 +659,13 @@ class App:
         self.page.window.min_height = 600
         self.page.vertical_alignment = ft.MainAxisAlignment.START
         self.page.horizontal_alignment = ft.CrossAxisAlignment.START
-        # 关闭时清理浏览器 / 子进程
         self.page.on_disconnect = self._cleanup
         self.page.on_window_event = self._on_window_event
 
     def _on_window_event(self, e: ft.WindowEvent) -> None:
         """用户关闭窗口时:若有运行中的 watcher 进程,弹出确认。"""
         if e.type == ft.WindowEventType.CLOSE:
-            if self.log_view is not None and not self.log_view._done:
+            if self.log_view is not None and self.log_view.is_running:
                 e.prevent_default()
                 self._confirm_close_with_running_runner()
 
@@ -756,10 +698,13 @@ class App:
 
     def _terminate_watcher_runner(self) -> None:
         if self.log_view is not None and self.log_view.runner is not None:
-            try:
-                self.log_view.runner.terminate()
-            except Exception:  # pragma: no cover
-                _logger.exception("终止子进程失败")
+            # runner.terminate() 内部 wait(5s) 会阻塞,在后台线程执行避免冻结事件循环。
+            runner = self.log_view.runner
+            threading.Thread(
+                target=runner.terminate,
+                daemon=True,
+                name="terminate-watcher",
+            ).start()
 
     def _cleanup(self, e=None) -> None:
         self._terminate_watcher_runner()
@@ -770,10 +715,6 @@ class App:
                 _logger.exception("关闭浏览器失败")
             self._browser_controller = None
 
-    # ------------------------------------------------------------------
-    # 日志窗口
-    # ------------------------------------------------------------------
-
     def open_log_window(self, **params) -> None:
         self.log_view = LogView(self.page, self, params)
         self.page.views.append(self.log_view.view)
@@ -783,9 +724,7 @@ class App:
     def close_log_window(self) -> None:
         if self.log_view is None:
             return
-        # 标记 done:视图被卸载后,_read_loop.finally 仍可能调度 _mark_done
-        # 去更新已不可见的控件。不致命但会浪费一次 page.update 并在某些 Flet
-        # 版本打 warning。
+        # _mark_closed 阻断 _read_loop.finally 对已卸载控件的无效更新。
         self.log_view._mark_closed()
         if self.log_view.runner is not None:
             try:
@@ -873,13 +812,7 @@ class App:
         self.close_browser_view()
 
 
-# ----------------------------------------------------------------------
-# 入口
-# ----------------------------------------------------------------------
-
-
 def _suppress_benign_urllib3_warnings() -> None:
-    
     class _Filter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
             return "Connection pool is full" not in record.getMessage()
@@ -893,7 +826,6 @@ def main(page: ft.Page) -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     _suppress_benign_urllib3_warnings()
-    # 退出兜底
     _FLET_PIDS: set[int] = set()
 
     def register_flet_pid(pid: int) -> None:

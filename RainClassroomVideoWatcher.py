@@ -5,6 +5,7 @@
 """
 
 import sys
+import os
 import argparse
 import string
 import time
@@ -13,30 +14,26 @@ import logging
 import random
 from typing import Any, Literal, Optional, Sequence
 
-####################################################################################################
-# 用户和课程信息
-
 DEFAULT_AUTHORITY = "changjiang.yuketang.cn"
 DEFAULT_XTBZ = "ykt"
 
-# 命令行参数会覆盖以下默认值
 authority = "changjiang.yuketang.cn"
 session_id = "0123456789abcdefghijklmnopqrstuv"
 csrf_token = "0123456789abcdefghijklmnopqrstuv"
 xtbz = "ykt"
 classroom_id = 12345678
 
-####################################################################################################
-# 调试参数（一般无需调整）
-
 logging_level = logging.INFO  # 日志
 timedelta = 60*30  # 视频观看日志时间戳提前秒数
 
-####################################################################################################
-
 
 def _parse_args() -> None:
-    """解析命令行参数,覆盖模块级默认变量。"""
+    """解析命令行参数和环境变量,覆盖模块级默认变量。
+
+    敏感凭据(sessionid, csrf_token, xtbz)优先从环境变量
+    RCVW_SESSIONID / RCVW_CSRF_TOKEN / RCVW_XTBZ 读取,
+    命令行参数作为向后兼容的备选方式。
+    """
     parser = argparse.ArgumentParser(
         prog="RainClassroomVideoWatcher",
         description="雨课堂视频自动观看脚本(GUI 调用的命令行入口)",
@@ -44,11 +41,11 @@ def _parse_args() -> None:
     parser.add_argument("--authority", default=DEFAULT_AUTHORITY,
         help="雨课堂域名,默认 changjiang.yuketang.cn")
     parser.add_argument("--sessionid", default=None,
-        help="浏览器 Cookie 中的 sessionid")
+        help="浏览器 Cookie 中的 sessionid(建议通过 RCVW_SESSIONID 环境变量传递)")
     parser.add_argument("--csrf-token", dest="csrf_token", default=None,
-        help="浏览器 Cookie 中的 csrftoken")
-    parser.add_argument("--xtbz", default=DEFAULT_XTBZ,
-        help="雨课堂标识,默认 ykt")
+        help="浏览器 Cookie 中的 csrftoken(建议通过 RCVW_CSRF_TOKEN 环境变量传递)")
+    parser.add_argument("--xtbz", default=None,
+        help="雨课堂标识(建议通过 RCVW_XTBZ 环境变量传递)")
     parser.add_argument("--classroom-id", dest="classroom_id", default=None, type=int,
         help="课程 ID(URL 末尾数字)")
     args = parser.parse_args()
@@ -56,28 +53,27 @@ def _parse_args() -> None:
     global authority, session_id, csrf_token, xtbz, classroom_id
     if args.authority:
         authority = args.authority
-    if args.sessionid:
-        session_id = args.sessionid
-    if args.csrf_token:
-        csrf_token = args.csrf_token
-    if args.xtbz:
-        xtbz = args.xtbz
+    sessionid = os.environ.get("RCVW_SESSIONID") or args.sessionid
+    if sessionid:
+        session_id = sessionid
+    csrf = os.environ.get("RCVW_CSRF_TOKEN") or args.csrf_token
+    if csrf:
+        csrf_token = csrf
+    xtbz_val = os.environ.get("RCVW_XTBZ") or args.xtbz
+    if xtbz_val:
+        xtbz = xtbz_val
     if args.classroom_id is not None:
         classroom_id = args.classroom_id
 
 
-_parse_args()
+_parse_args() if __name__ == '__main__' else None
 
-####################################################################################################
 
 try:
     import httpx
 except ModuleNotFoundError as e:
     print("你需要执行 'pip install httpx[http2]' 以安装 HTTPX")
     exit()
-
-####################################################################################################
-# 自定义日志级别
 
 SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
@@ -92,23 +88,18 @@ logging.Logger.success = _log_success  # type: ignore[attr-defined]
 
 
 class _GuiFormatter(logging.Formatter):
-    """
-    GUI 友好的日志格式:输出单行 `[LEVEL] message`。
-    """
+    """GUI 友好的日志格式:输出单行 `[LEVEL] message`。"""
     def format(self, record: logging.LogRecord) -> str:
         levelname = record.levelname
         msg = record.getMessage()
         return f"[{levelname}] {msg}"
 
 
-####################################################################################################
-
 class RainClassroomClient:
     """雨课堂客户端接口"""
     def __init__(self, authority: str, session_id: str, csrf_token: str, xtbz: str,
         logging_level = logging.INFO,
     ) -> None:
-        # 日志 Logging
         self._logger = logging.getLogger(f"RainClassroomClient {id(self)}")
         if not self._logger.hasHandlers():
             logging_handler = logging.StreamHandler(sys.stdout)
@@ -128,18 +119,18 @@ class RainClassroomClient:
         cookies = dict()
         cookies['sessionid'] = session_id
         cookies['csrftoken'] = csrf_token
-        # cookies["xtbz"] = xtbz
         self._session = httpx.AsyncClient(headers=headers, cookies=cookies,
             limits=httpx.Limits(max_connections=2, keepalive_expiry=60))
 
-        self._logger.info(f"{self._authority=}, {session_id=}, {csrf_token=}, {xtbz=}")
+        self._logger.info(f"{self._authority=}, {xtbz=}")
+
+    async def aclose(self) -> None:
+        """关闭 HTTP 客户端,释放连接池资源。"""
+        await self._session.aclose()
 
     async def sleep(self, delay: float | int) -> None:
         self._logger.info(f"等待{delay}秒")
         await asyncio.sleep(delay)
-
-    ################################################################################################
-    # 请求
 
     async def _request(self, method: Literal['GET', 'POST'], path: str,
         *, keys: Any | tuple[Any, ...] = (), s: str = '', **kwargs,
@@ -179,9 +170,6 @@ class RainClassroomClient:
     ) -> dict | list[dict]:
         """异步POST请求"""
         return await self._request('POST', path, keys=keys, s=s, **kwargs)
-
-    ################################################################################################
-    # 雨课堂接口
 
     async def query_user_v2(self) -> dict:
         """查询用户"""
@@ -256,8 +244,6 @@ class RainClassroomClient:
         return data
 
 
-####################################################################################################
-
 class AttributeDict(dict):
     """属性字典"""
     __slots__ = ()
@@ -312,8 +298,6 @@ class RainClassroomVideoLog(object):
         self.log.slide = 0
         self.log.v_url = ''
 
-    ################################################################################################
-
     def on_loadstart(self) -> dict:
         self.log.et = 'loadstart'
         self.log.sq += 1
@@ -364,8 +348,6 @@ class RainClassroomVideoLog(object):
         self.log.sq += 1
         return self.log.copy()
 
-    ################################################################################################
-
     @classmethod
     def build_video_logs(cls, *, user_id: int, course_id: int, classroom_id: int, video_id: int,
         sku_id: int, cc_id: int, duration: float | int, timestamp: Optional[int] = None,
@@ -384,9 +366,6 @@ class RainClassroomVideoLog(object):
                 for _ in range(5, int(logger.log.d+1), 5)),
             logger.on_heartbeat(int(logger.log.d%5*1000)), logger.on_pause(), logger.on_ended()]
 
-
-####################################################################################################
-
 class RainClassroomVideoWatcher(RainClassroomClient):
     """雨课堂视频观看器"""
     def __init__(self,  authority: str, session_id: str, csrf_token: str, xtbz: str,
@@ -395,8 +374,6 @@ class RainClassroomVideoWatcher(RainClassroomClient):
         super().__init__(authority, session_id, csrf_token, xtbz, logging_level)
         self.classroom_id = classroom_id
         self.timedelta = timedelta
-
-    ################################################################################################
 
     def _set_university_id(self, university_id: Optional[int] = None) -> None:
         self.university_id = university_id or self.university_id
@@ -415,20 +392,18 @@ class RainClassroomVideoWatcher(RainClassroomClient):
         self._logger.info(f"获取信息完成，user_id={self.user_id}, course_id{self.course_id}, "
             f"course_sign={self.course_sign}, university_id={self.university_id}")
 
-    ################################################################################################
-
     @classmethod
     def _get_chapter_leaf(cls, leafs: list[dict], tree: list[dict], leaf_type: int = None) -> None:
         """递归获得章节节点列表"""
         for leaf in tree:
             if leaf_type is None or leaf.get("leaf_type") == leaf_type:
                 leafs.append(leaf)
-            elif "section_leaf_list" in leaf:
+            # 匹配节点后仍需递归子节点,避免遗漏嵌套结构
+            if "section_leaf_list" in leaf:
                 cls._get_chapter_leaf(leafs, leaf["section_leaf_list"], leaf_type)
-            elif "leaf_list" in leaf:
+            if "leaf_list" in leaf:
                 cls._get_chapter_leaf(leafs, leaf["leaf_list"], leaf_type)
 
-    ################################################################################################
 
     async def batch_query_leaf(self, chapters_leafs: list[dict]) -> list[dict]:
         """批量查询章节节点"""
@@ -459,62 +434,59 @@ class RainClassroomVideoWatcher(RainClassroomClient):
                 timestamp=int(time.time_ns()/1000000)-self.timedelta*1000))
             for leaf, progress in zip(leafs, progresses)))
 
-    ################################################################################################
-
     async def watch(self) -> bool:
         """观看视频
 
         :returns: ``True`` 表示所有视频均已完成,``False`` 表示仍有视频未完成
             (重试 4 轮仍未达标),此时上层应区别对待(退出码非 0)。
         """
-        await self.obtain_info()
+        try:
+            await self.obtain_info()
 
-        self._logger.info("获取章节和节点开始")
-        chapters_leafs = await self.query_chapters(
-            self.classroom_id, self.course_sign, self.university_id)
-        videos = list()
-        self._get_chapter_leaf(videos, chapters_leafs, leaf_type=0)
-        self._logger.info(f"获取章节和节点完成，共{len(chapters_leafs)}节点，共{len(videos)}视频")
+            self._logger.info("获取章节和节点开始")
+            chapters_leafs = await self.query_chapters(
+                self.classroom_id, self.course_sign, self.university_id)
+            videos = list()
+            self._get_chapter_leaf(videos, chapters_leafs, leaf_type=0)
+            self._logger.info(f"获取章节和节点完成，共{len(chapters_leafs)}节点，共{len(videos)}视频")
 
-        all_done = False
-        retry = 0
-        while retry <= 3:
+            all_done = False
+            retry = 0
+            while retry <= 3:
 
-            if retry == 1:
-                self._logger.info("获取章节节点开始")
-                videos = await self.batch_query_leaf(videos)
-                self._logger.info(f"获取章节节点完成，共{len(videos)}视频")
-                await self.sleep(2+len(videos))
+                if retry == 1:
+                    self._logger.info("获取章节节点开始")
+                    videos = await self.batch_query_leaf(videos)
+                    self._logger.info(f"获取章节节点完成，共{len(videos)}视频")
+                    await self.sleep(2+len(videos))
 
-            if retry >= 1:
-                self._logger.info(f"发送视频观看日志开始,共{len(videos)}视频")
-                await self.batch_send_video_logs(videos, progresses)
-                self._logger.info("发送视频观看日志完成")
-                await self.sleep(2+len(videos))
+                if retry >= 1:
+                    self._logger.info(f"发送视频观看日志开始,共{len(videos)}视频")
+                    await self.batch_send_video_logs(videos, progresses)
+                    self._logger.info("发送视频观看日志完成")
+                    await self.sleep(2+len(videos))
 
-            retry += 1
-            self._logger.info(f"第{retry}次获取视频观看进度开始")
-            progresses = await self.batch_query_video_watch_progress(videos)
-            videos_progresses = tuple((leaf, progress)
-                for leaf, progress in zip(videos, progresses)
-                if progress is None or not bool(progress["completed"]))
-                # if progress is None or progress["rate"] < 1)
+                retry += 1
+                self._logger.info(f"第{retry}次获取视频观看进度开始")
+                progresses = await self.batch_query_video_watch_progress(videos)
+                videos_progresses = tuple((leaf, progress)
+                    for leaf, progress in zip(videos, progresses)
+                    if progress is None or not bool(progress["completed"]))
 
-            if not videos_progresses:
-                self._logger.success("获取视频观看进度完成,全部视频已完成")
-                all_done = True
-                break
+                if not videos_progresses:
+                    self._logger.success("获取视频观看进度完成,全部视频已完成")
+                    all_done = True
+                    break
+                else:
+                    videos, progresses = zip(*videos_progresses)
+                    self._logger.info(f"获取视频观看进度完成，共{len(videos)}视频未完成")
+
             else:
-                videos, progresses = zip(*videos_progresses)
-                self._logger.info(f"获取视频观看进度完成，共{len(videos)}视频未完成")
+                self._logger.error(f"已{retry}次获取视频观看进度,但{len(videos)}视频未完成")
 
-        else:
-            self._logger.error(f"已{retry}次获取视频观看进度,但{len(videos)}视频未完成")
-
-        return all_done
-
-
-####################################################################################################
+            return all_done
+        finally:
+            await self.aclose()
 
 if __name__ == '__main__':
     watcher = RainClassroomVideoWatcher(authority=authority,
@@ -525,7 +497,7 @@ if __name__ == '__main__':
         if all_done:
             watcher._logger.success("刷课完成")
         else:
-            # watch() 内部已记 ERROR,这里用 WARNING + 退出码 3 区分"非异常但未完成"。
+            # watch() 内已记 ERROR,此处 WARNING + 退出码 3 区分"非异常但未完成"
             watcher._logger.warning("刷课未完成:仍有视频未达到完成状态")
             sys.exit(3)
     except KeyboardInterrupt:

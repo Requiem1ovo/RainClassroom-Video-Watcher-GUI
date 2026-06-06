@@ -40,7 +40,6 @@ class BrowserController(ABC):
 
     @abstractmethod
     def get_cookies(self) -> CookieData:
-       
         raise NotImplementedError
 
     @abstractmethod

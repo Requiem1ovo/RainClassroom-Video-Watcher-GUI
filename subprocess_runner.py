@@ -1,6 +1,3 @@
-"""
-子进程运行器
-"""
 from __future__ import annotations
 
 import logging
@@ -26,6 +23,8 @@ _CHILD_ENV_ENCODING = {
     "PYTHONUTF8": "1",
 }
 
+
+_SENSITIVE_ENV_PREFIX = "RCVW_"
 
 _SENSITIVE_FLAGS = frozenset({"--sessionid", "--csrf-token", "--xtbz"})
 
@@ -55,16 +54,7 @@ def _sanitize_line(line: str) -> str:
 
 
 class WatcherRunner:
-    """
-    封装 RainClassroomVideoWatcher.py 子进程。
-
-    使用方式::
-
-        runner = WatcherRunner(authority="...", sessionid="...", ...)
-        for line in runner.stream():
-            handle(line)
-        runner.wait()
-    """
+    """封装 RainClassroomVideoWatcher.py 子进程。"""
 
     def __init__(
         self,
@@ -92,11 +82,17 @@ class WatcherRunner:
             self.python,
             str(_WATCHER_SCRIPT),
             "--authority", self.authority,
-            "--sessionid", self.sessionid,
-            "--csrf-token", self.csrf_token,
-            "--xtbz", self.xtbz,
             "--classroom-id", str(self.classroom_id),
         ]
+
+    def _build_env(self) -> dict[str, str]:
+        """构建子进程环境变量，敏感凭据通过环境变量传递以避免命令行暴露。"""
+        env = os.environ.copy()
+        env.update(_CHILD_ENV_ENCODING)
+        env[f"{_SENSITIVE_ENV_PREFIX}SESSIONID"] = self.sessionid
+        env[f"{_SENSITIVE_ENV_PREFIX}CSRF_TOKEN"] = self.csrf_token
+        env[f"{_SENSITIVE_ENV_PREFIX}XTBZ"] = self.xtbz
+        return env
 
     def start(self) -> None:
         """启动子进程(非阻塞)。"""
@@ -109,8 +105,7 @@ class WatcherRunner:
 
         cmd = self._build_cmd()
         _logger.info("启动子进程: %s", " ".join(shlex.quote(c) for c in _sanitize_argv(cmd)))
-        env = os.environ.copy()
-        env.update(_CHILD_ENV_ENCODING)
+        env = self._build_env()
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,

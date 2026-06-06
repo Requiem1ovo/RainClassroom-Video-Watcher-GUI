@@ -1,6 +1,3 @@
-"""
-Windows 平台浏览器控制器实现
-"""
 from __future__ import annotations
 
 import logging
@@ -23,7 +20,6 @@ _logger = logging.getLogger(__name__)
 
 
 def _short_webdriver_error(e: WebDriverException) -> str:
-    
     msg = str(e).strip()
    
     if msg.startswith("Message:"):
@@ -34,7 +30,6 @@ def _short_webdriver_error(e: WebDriverException) -> str:
 
 
 def _kill_process_tree(pid: int) -> None:
-    
     if sys.platform != "win32":
         return
     try:
@@ -48,29 +43,35 @@ def _kill_process_tree(pid: int) -> None:
 
 
 class WindowsBrowserController(BrowserController):
-    """
-    Windows 平台:通过 Selenium 4 + Selenium Manager 启动 Edge 浏览器。
-
-    - `start_browser(url)`:Selenium Manager 会自动查找/下载与本机 Edge 版本匹配的
-      msedgedriver(默认缓存到 `%LOCALAPPDATA%\\selenium\\msedgedriver\\`),
-      启动 Edge 并导航至 `url`
-    - `get_cookies()`:从当前页面抓取 sessionid/csrf_token,尝试从 URL 末尾解析 classroom_id
-    - `quit()`:关闭浏览器进程
-
-    使用约束:
-    - 需要 selenium >= 4.6(自带 Selenium Manager,见 requirements.txt)
-    - 系统中已安装 Microsoft Edge 浏览器
-    - 首次运行需要联网(Selenium Manager 会在缓存缺失时下载 msedgedriver);
-      若离线,可提前把 msedgedriver.exe 放到任意已在 PATH 的目录,Manager 会优先复用
-    """
+    """Windows 平台:通过 Selenium 4 + Selenium Manager 启动 Edge 浏览器。"""
 
     def __init__(self) -> None:
         super().__init__()
         self._driver: Optional["webdriver.Edge"] = None
 
-    # ------------------------------------------------------------------
-    # 公开 API
-    # ------------------------------------------------------------------
+    def _is_driver_alive(self) -> bool:
+        """检测 driver 对象是否仍可正常通信。"""
+        if self._driver is None:
+            return False
+        try:
+            _ = self._driver.current_url
+            return True
+        except WebDriverException:
+            return False
+
+    def _reset_driver(self) -> None:
+        """重置已失效的 driver 状态。"""
+        if self._driver is not None:
+            try:
+                service = getattr(self._driver, "service", None)
+                if service is not None and getattr(service, "process", None) is not None:
+                    pid = service.process.pid
+                    if pid:
+                        _kill_process_tree(pid)
+            except Exception:  # pragma: no cover
+                _logger.exception("清理失效 driver 进程失败")
+            self._driver = None
+            self._started = False
 
     def start_browser(self, url: str) -> None:
         """启动 Edge 浏览器并导航至 `url`。"""
@@ -78,13 +79,15 @@ class WindowsBrowserController(BrowserController):
             raise BrowserControllerError(
                 "selenium 未安装,请先执行 'pip install -r requirements.txt'"
             )
-        if self._driver is not None:
+        if self._is_driver_alive():
             _logger.info("浏览器已启动,直接导航至 %s", url)
             self._driver.get(url)
             return
+        elif self._driver is not None:
+            _logger.info("浏览器已关闭,重新启动")
+            self._reset_driver()
 
-        # 不传 executable_path → Selenium Manager 自动解析:
-        # 1) 本机 PATH 中的 msedgedriver;2) Selenium 缓存目录(已下载过);3) 联网下载。
+        # Selenium Manager 自动解析本机 PATH / 缓存 / 联网下载
         service = EdgeService()
         try:
             self._driver = webdriver.Edge(service=service)
@@ -107,7 +110,7 @@ class WindowsBrowserController(BrowserController):
         if self._driver is None:
             raise BrowserControllerError("浏览器尚未启动,请先调用 start_browser()")
 
-        # 用户可能手动关 Edge → driver 对象还在但 WebDriver 协议已断开。
+        # 用户可能手动关 Edge → WebDriver 协议已断开
         try:
             raw: dict[str, str] = {}
             for c in self._driver.get_cookies():
@@ -151,7 +154,7 @@ class WindowsBrowserController(BrowserController):
             driver.quit()
         except Exception:  # pragma: no cover
             _logger.exception("关闭 Edge 浏览器时发生错误")
-            # quit() 失败 → 兜底:用 `taskkill /T /F /PID` 杀 msedgedriver
+            # quit() 失败 → 兜底: taskkill 杀 msedgedriver
             try:
                 service = getattr(driver, "service", None)
                 if service is not None and getattr(service, "process", None) is not None:
