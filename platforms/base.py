@@ -34,6 +34,10 @@ class BrowserController(ABC):
         """启动浏览器并导航至指定 URL。"""
 
     @abstractmethod
+    def needs_driver_download(self) -> bool:
+        """返回 True 表示驱动尚未缓存，启动时可能需要联网下载。"""
+
+    @abstractmethod
     def get_cookies(self) -> CookieData:
         raise NotImplementedError
 

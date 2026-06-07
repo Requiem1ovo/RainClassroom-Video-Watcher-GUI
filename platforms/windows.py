@@ -4,6 +4,7 @@ import logging
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Optional
 
 try:
@@ -72,6 +73,16 @@ class WindowsBrowserController(BrowserController):
                 _logger.exception("清理失效 driver 进程失败")
             self._driver = None
             self._started = False
+
+    def needs_driver_download(self) -> bool:
+        """检查 msedgedriver 是否已缓存，返回 True 表示可能需要联网下载。"""
+        if self._is_driver_alive():
+            return False
+        cache_dir = Path.home() / ".cache" / "selenium"
+        if cache_dir.exists():
+            for _ in cache_dir.rglob("msedgedriver.exe"):
+                return False
+        return True
 
     def start_browser(self, url: str) -> None:
         """启动 Edge 浏览器并导航至 `url`。"""

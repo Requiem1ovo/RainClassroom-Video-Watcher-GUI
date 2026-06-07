@@ -373,7 +373,12 @@ class BrowserView:
         )
 
     async def on_mount(self) -> None:
-        _show_snack(self.page, "正在启动浏览器，首次使用可能需要下载驱动...")
+        controller = self.app.ensure_browser_controller()
+        if controller is None:
+            _show_snack(self.page, "浏览器控制器创建失败", error=True)
+            return
+        if controller.needs_driver_download():
+            _show_snack(self.page, "首次启动需要下载WebDriver请耐心等待...")
         ok = await asyncio.to_thread(
             self.app.start_browser_if_needed, self.authority,
         )
@@ -755,8 +760,17 @@ class App:
         self.browser_view = None
         self.page.run_task(self.page.push_route, "/")
 
+    def ensure_browser_controller(self):
+        """惰性创建浏览器控制器;失败返回 None。"""
+        if self._browser_controller is None:
+            try:
+                self._browser_controller = create_browser_controller()
+            except (NotImplementedError, BrowserControllerError):
+                return None
+        return self._browser_controller
+
     def start_browser_if_needed(self, authority: str) -> bool:
-        """惰性创建 + 启动浏览器;成功返回 True。"""
+        """启动浏览器;成功返回 True。"""
         if self._browser_controller is None:
             try:
                 self._browser_controller = create_browser_controller()
